@@ -10,8 +10,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import cv2
-import SimpleITK as sitk
 from lib import utils, dvgo, dcvgo, dmpigo, dvgo_tivox
 from lib.load_data import load_data
 
@@ -57,55 +55,14 @@ def config_parser():
                         help='frequency of console printout and metric loggin')
     parser.add_argument("--i_weights", type=int, default=100000,
                         help='frequency of weight ckpt saving')
-
-    # for dsa
-    parser.add_argument("--train_num", type=int, default=50,
-                        help='frequency of weight ckpt saving')
-    parser.add_argument("--radius", type=float, default=0.5985,
-                        help='frequency of weight ckpt saving')
-    parser.add_argument("--focal", type=int, default=4086,
-                        help='frequency of weight ckpt saving')
-    parser.add_argument("--size", type=int, default=1024,
-                        help='frequency of weight ckpt saving')
-    parser.add_argument("--expname", type=str, default=None,
-                        help='frequency of weight ckpt saving')
-    parser.add_argument("--save_txt", type=str, default=None)
-    parser.add_argument("--no_color", action='store_true')
-    parser.add_argument("--tivox", action='store_true') # set tivox model and data, only suit for dsa data
-    parser.add_argument("--numdensity", type=int, default=4,
-                        help='frequency of weight ckpt saving')
-    parser.add_argument("--num_voxels", type=int, default=None,
-                        help='frequency of weight ckpt saving')
-    parser.add_argument("--gridnum_scale", type=str, default='',
-                        help='frequency of weight ckpt saving')
-    parser.add_argument("--skipcoarse", action='store_true')                 
-    parser.add_argument("--idea", action='store_true') # test 3d psnr and save 3d txt
-    parser.add_argument("--noallgrid", action='store_true')
-    parser.add_argument("--time_mlp", action='store_true')
     return parser
 
-def resize_image_itk(itkimage, newSize, resamplemethod=sitk.sitkNearestNeighbor):
-
-    resampler = sitk.ResampleImageFilter()
-    originSize = itkimage.GetSize()
-    originSpacing = itkimage.GetSpacing()
-    newSize = np.array(newSize,float)
-    factor = originSize / newSize
-    newSpacing = originSpacing * factor
-    newSize = newSize.astype(np.int)
-    resampler.SetReferenceImage(itkimage)
-    resampler.SetSize(newSize.tolist())
-    resampler.SetOutputSpacing(newSpacing.tolist())
-    resampler.SetTransform(sitk.Transform(3, sitk.sitkIdentity))
-    resampler.SetInterpolator(resamplemethod)
-    itkimgResampled = resampler.Execute(itkimage)
-    return itkimgResampled
 
 @torch.no_grad()
 def render_viewpoints(model, render_poses, HW, Ks, ndc, render_kwargs,
                       gt_imgs=None, savedir=None, dump_images=False,
                       render_factor=0, render_video_flipy=False, render_video_rot90=0,
-                      eval_ssim=False, eval_lpips_alex=False, eval_lpips_vgg=False, render_times = None):
+                      eval_ssim=False, eval_lpips_alex=False, eval_lpips_vgg=False):
     '''Render images for the given viewpoints; run evaluation if gt given.
     '''
     assert len(render_poses) == len(HW) and len(HW) == len(Ks)
@@ -136,22 +93,10 @@ def render_viewpoints(model, render_poses, HW, Ks, ndc, render_kwargs,
         rays_o = rays_o.flatten(0,-2)
         rays_d = rays_d.flatten(0,-2)
         viewdirs = viewdirs.flatten(0,-2)
-        if render_times != None:
-            time_one = render_times[i]*torch.ones_like(rays_o[:,0:1])
-        # render_result_chunks = [
-        #     {k: v for k, v in model(ro, rd, vd, **render_kwargs).items() if k in keys}
-        #     for ro, rd, vd in zip(rays_o.split(8192, 0), rays_d.split(8192, 0), viewdirs.split(8192, 0))
-        # ]
-        if render_times != None:
-            render_result_chunks = [
-                {k: v for k, v in model(ro, rd, vd,ts, **render_kwargs).items() if k in keys}
-                for ro, rd, vd ,ts in zip(rays_o.split(8192, 0), rays_d.split(8192, 0), viewdirs.split(8192, 0),time_one.split(8192, 0))
-            ]
-        else:
-            render_result_chunks = [
-                {k: v for k, v in model(ro, rd, vd, **render_kwargs).items() if k in keys}
-                for ro, rd, vd in zip(rays_o.split(8192, 0), rays_d.split(8192, 0), viewdirs.split(8192, 0))
-            ]
+        render_result_chunks = [
+            {k: v for k, v in model(ro, rd, vd, **render_kwargs).items() if k in keys}
+            for ro, rd, vd in zip(rays_o.split(8192, 0), rays_d.split(8192, 0), viewdirs.split(8192, 0))
+        ]
         render_result = {
             k: torch.cat([ret[k] for ret in render_result_chunks]).reshape(H,W,-1)
             for k in render_result_chunks[0].keys()
@@ -204,7 +149,7 @@ def render_viewpoints(model, render_poses, HW, Ks, ndc, render_kwargs,
     depths = np.array(depths)
     bgmaps = np.array(bgmaps)
 
-    return rgbs, depths, bgmaps, np.mean(psnrs)
+    return rgbs, depths, bgmaps
 
 
 def seed_everything():
@@ -219,16 +164,10 @@ def seed_everything():
 def load_everything(args, cfg):
     '''Load images / poses / camera settings / data split.
     '''
-    data_dict = load_data(cfg.data, args.train_num, args.radius, args.focal, args.size, args.tivox, args.time_mlp)
+    data_dict = load_data(cfg.data)
 
     # remove useless field
-    if args.tivox or args.time_mlp:
-        kept_keys = {
-            'hwf', 'HW', 'Ks', 'near', 'far', 'near_clip',
-            'i_train', 'i_val', 'i_test', 'irregular_shape',
-            'poses', 'render_poses', 'images','times','render_times'}
-    else:
-        kept_keys = {
+    kept_keys = {
             'hwf', 'HW', 'Ks', 'near', 'far', 'near_clip',
             'i_train', 'i_val', 'i_test', 'irregular_shape',
             'poses', 'render_poses', 'images'}
@@ -243,6 +182,7 @@ def load_everything(args, cfg):
         data_dict['images'] = torch.FloatTensor(data_dict['images'], device='cpu')
     data_dict['poses'] = torch.Tensor(data_dict['poses'])
     return data_dict
+
 
 def _compute_bbox_by_cam_frustrm_bounded(cfg, HW, Ks, poses, i_train, near, far):
     xyz_min = torch.Tensor([np.inf, np.inf, np.inf])
@@ -305,9 +245,6 @@ def compute_bbox_by_coarse_geo(model_class, model_path, thres):
     dense_xyz = model.xyz_min * (1-interp) + model.xyz_max * interp
     density = model.density(dense_xyz)
     alpha = model.activate_density(density)
-    if len(alpha.shape) > 3:
-        if alpha.shape[3] > 1:
-            alpha = alpha.max(3)[0]
     mask = (alpha > thres)
     active_xyz = dense_xyz[mask]
     xyz_min = active_xyz.amin(0)
@@ -318,17 +255,9 @@ def compute_bbox_by_coarse_geo(model_class, model_path, thres):
     print('compute_bbox_by_coarse_geo: finish (eps time:', eps_time, 'secs)')
     return xyz_min, xyz_max
 
-def create_new_model(cfg, cfg_model, cfg_train, xyz_min, xyz_max, stage, coarse_ckpt_path, args):
+def create_new_model(cfg, cfg_model, cfg_train, xyz_min, xyz_max, stage, coarse_ckpt_path):
     model_kwargs = copy.deepcopy(cfg_model)
     num_voxels = model_kwargs.pop('num_voxels')
-    if args.no_color == True:
-        model_kwargs.pop('k0_type')
-        model_kwargs.pop('k0_config')
-        model_kwargs.pop('rgbnet_dim')
-        model_kwargs.pop('rgbnet_full_implicit')
-        model_kwargs.pop('rgbnet_direct')
-        model_kwargs.pop('rgbnet_depth')
-        model_kwargs.pop('rgbnet_width')
     if len(cfg_train.pg_scale):
         num_voxels = int(num_voxels / (2**len(cfg_train.pg_scale)))
 
@@ -346,23 +275,11 @@ def create_new_model(cfg, cfg_model, cfg_train, xyz_min, xyz_max, stage, coarse_
             **model_kwargs)
     else:
         print(f'scene_rep_reconstruction ({stage}): \033[96muse dense voxel grid\033[0m')
-        if args.tivox == True:
-            model = dvgo_tivox.DirectVoxGO_tivox(
-                xyz_min=xyz_min, xyz_max=xyz_max,
-                num_voxels=num_voxels,
-                mask_cache_path=coarse_ckpt_path,
-                color_nouse=args.no_color,
-                densitynum = args.numdensity,
-                noallgrid = args.noallgrid,
-                **model_kwargs)
-        else:
-            model = dvgo.DirectVoxGO(
-                xyz_min=xyz_min, xyz_max=xyz_max,
-                num_voxels=num_voxels,
-                mask_cache_path=coarse_ckpt_path,
-                color_nouse=args.no_color, # True
-                time_mlp=args.time_mlp, # True
-                **model_kwargs)
+        model = dvgo.DirectVoxGO(
+            xyz_min=xyz_min, xyz_max=xyz_max,
+            num_voxels=num_voxels,
+            mask_cache_path=coarse_ckpt_path,
+            **model_kwargs)
     model = model.to(device)
     optimizer = utils.create_optimizer_or_freeze_model(model, cfg_train, global_step=0)
     return model, optimizer
@@ -373,10 +290,7 @@ def load_existed_model(args, cfg, cfg_train, reload_ckpt_path):
     elif cfg.data.unbounded_inward:
         model_class = dcvgo.DirectContractedVoxGO
     else:
-        if args.tivox:
-            model_class = dvgo_tivox.DirectVoxGO_tivox
-        else:
-            model_class = dvgo.DirectVoxGO
+        model_class = dvgo.DirectVoxGO
     model = utils.load_model(model_class, reload_ckpt_path).to(device)
     optimizer = utils.create_optimizer_or_freeze_model(model, cfg_train, global_step=0)
     model, optimizer, start = utils.load_checkpoint(
@@ -391,19 +305,11 @@ def scene_rep_reconstruction(args, cfg, cfg_model, cfg_train, xyz_min, xyz_max, 
         xyz_shift = (xyz_max - xyz_min) * (cfg_model.world_bound_scale - 1) / 2
         xyz_min -= xyz_shift
         xyz_max += xyz_shift
-    if args.tivox or args.time_mlp:
-        HW, Ks, near, far, i_train, i_val, i_test, poses, render_poses, images, times, render_times = [
-            data_dict[k] for k in [
-                'HW', 'Ks', 'near', 'far', 'i_train', 'i_val', 'i_test', 'poses', 'render_poses', 'images','times','render_times'
-            ]
+    HW, Ks, near, far, i_train, i_val, i_test, poses, render_poses, images = [
+        data_dict[k] for k in [
+            'HW', 'Ks', 'near', 'far', 'i_train', 'i_val', 'i_test', 'poses', 'render_poses', 'images'
         ]
-    else:
-        HW, Ks, near, far, i_train, i_val, i_test, poses, render_poses, images = [
-            data_dict[k] for k in [
-                'HW', 'Ks', 'near', 'far', 'i_train', 'i_val', 'i_test', 'poses', 'render_poses', 'images'
-            ]
-        ]
-        times, render_times = None, None
+    ]
 
     # find whether there is existing checkpoint path
     last_ckpt_path = os.path.join(cfg.basedir, cfg.expname, f'{stage}_last.tar')
@@ -419,7 +325,7 @@ def scene_rep_reconstruction(args, cfg, cfg_model, cfg_train, xyz_min, xyz_max, 
     # init model and optimizer
     if reload_ckpt_path is None:
         print(f'scene_rep_reconstruction ({stage}): train from scratch')
-        model, optimizer = create_new_model(cfg, cfg_model, cfg_train, xyz_min, xyz_max, stage, coarse_ckpt_path, args)
+        model, optimizer = create_new_model(cfg, cfg_model, cfg_train, xyz_min, xyz_max, stage, coarse_ckpt_path)
         start = 0
         if cfg_model.maskout_near_cam_vox:
             model.maskout_near_cam_vox(poses[i_train,:3,3], near)
@@ -441,43 +347,36 @@ def scene_rep_reconstruction(args, cfg, cfg_model, cfg_train, xyz_min, xyz_max, 
 
     # init batch rays sampler
     def gather_training_rays():
-        if times != None:
-            times_i_train = times[i_train]
-        else: 
-            times_i_train = None
         if data_dict['irregular_shape']:
             rgb_tr_ori = [images[i].to('cpu' if cfg.data.load2gpu_on_the_fly else device) for i in i_train]
         else:
             rgb_tr_ori = images[i_train].to('cpu' if cfg.data.load2gpu_on_the_fly else device)
 
         if cfg_train.ray_sampler == 'in_maskcache':
-            rgb_tr, rays_o_tr, rays_d_tr, viewdirs_tr, imsz, time_tr = dvgo.get_training_rays_in_maskcache_sampling(
+            rgb_tr, rays_o_tr, rays_d_tr, viewdirs_tr, imsz = dvgo.get_training_rays_in_maskcache_sampling(
                     rgb_tr_ori=rgb_tr_ori,
-                    times=times_i_train,
                     train_poses=poses[i_train],
                     HW=HW[i_train], Ks=Ks[i_train],
                     ndc=cfg.data.ndc, inverse_y=cfg.data.inverse_y,
                     flip_x=cfg.data.flip_x, flip_y=cfg.data.flip_y,
                     model=model, render_kwargs=render_kwargs)
         elif cfg_train.ray_sampler == 'flatten':
-            rgb_tr, rays_o_tr, rays_d_tr, viewdirs_tr, imsz, time_tr = dvgo.get_training_rays_flatten(
+            rgb_tr, rays_o_tr, rays_d_tr, viewdirs_tr, imsz = dvgo.get_training_rays_flatten(
                 rgb_tr_ori=rgb_tr_ori,
-                times=times_i_train,
                 train_poses=poses[i_train],
                 HW=HW[i_train], Ks=Ks[i_train], ndc=cfg.data.ndc, inverse_y=cfg.data.inverse_y,
                 flip_x=cfg.data.flip_x, flip_y=cfg.data.flip_y)
         else:
-            rgb_tr, rays_o_tr, rays_d_tr, viewdirs_tr, imsz, time_tr = dvgo.get_training_rays(
+            rgb_tr, rays_o_tr, rays_d_tr, viewdirs_tr, imsz = dvgo.get_training_rays(
                 rgb_tr=rgb_tr_ori,
-                times=times_i_train,
                 train_poses=poses[i_train],
                 HW=HW[i_train], Ks=Ks[i_train], ndc=cfg.data.ndc, inverse_y=cfg.data.inverse_y,
                 flip_x=cfg.data.flip_x, flip_y=cfg.data.flip_y)
         index_generator = dvgo.batch_indices_generator(len(rgb_tr), cfg_train.N_rand)
         batch_index_sampler = lambda: next(index_generator)
-        return rgb_tr, rays_o_tr, rays_d_tr, viewdirs_tr, imsz, batch_index_sampler, time_tr
+        return rgb_tr, rays_o_tr, rays_d_tr, viewdirs_tr, imsz, batch_index_sampler
 
-    rgb_tr, rays_o_tr, rays_d_tr, viewdirs_tr, imsz, batch_index_sampler, time_tr = gather_training_rays()
+    rgb_tr, rays_o_tr, rays_d_tr, viewdirs_tr, imsz, batch_index_sampler = gather_training_rays()
 
     # view-count-based learning rate
     if cfg_train.pervoxel_lr:
@@ -509,7 +408,7 @@ def scene_rep_reconstruction(args, cfg, cfg_model, cfg_train, xyz_min, xyz_max, 
         if global_step in cfg_train.pg_scale:
             n_rest_scales = len(cfg_train.pg_scale)-cfg_train.pg_scale.index(global_step)-1
             cur_voxels = int(cfg_model.num_voxels / (2**n_rest_scales))
-            if isinstance(model, (dvgo.DirectVoxGO, dcvgo.DirectContractedVoxGO, dvgo_tivox.DirectVoxGO_tivox)):
+            if isinstance(model, (dvgo.DirectVoxGO, dcvgo.DirectContractedVoxGO)):
                 model.scale_volume_grid(cur_voxels)
             elif isinstance(model, dmpigo.DirectMPIGO):
                 model.scale_volume_grid(cur_voxels, model.mpi_depth)
@@ -518,13 +417,6 @@ def scene_rep_reconstruction(args, cfg, cfg_model, cfg_train, xyz_min, xyz_max, 
             optimizer = utils.create_optimizer_or_freeze_model(model, cfg_train, global_step=0)
             model.act_shift -= cfg_train.decay_after_scale
             torch.cuda.empty_cache()
-        
-        # for gridnum_scale
-        if stage == 'fine' and args.tivox and cfg_train.gridnum_scale != None:
-            if global_step in cfg_train.gridnum_scale:
-                model.scale_grid_num(7)
-                optimizer = utils.create_optimizer_or_freeze_model(model, cfg_train, global_step=0)
-                torch.cuda.empty_cache()
 
         # random sample rays
         if cfg_train.ray_sampler in ['flatten', 'in_maskcache']:
@@ -533,10 +425,6 @@ def scene_rep_reconstruction(args, cfg, cfg_model, cfg_train, xyz_min, xyz_max, 
             rays_o = rays_o_tr[sel_i]
             rays_d = rays_d_tr[sel_i]
             viewdirs = viewdirs_tr[sel_i]
-            if time_tr != None:
-                frame_time = time_tr[sel_i]
-            else:
-                frame_time = None
         elif cfg_train.ray_sampler == 'random':
             sel_b = torch.randint(rgb_tr.shape[0], [cfg_train.N_rand])
             sel_r = torch.randint(rgb_tr.shape[1], [cfg_train.N_rand])
@@ -545,10 +433,6 @@ def scene_rep_reconstruction(args, cfg, cfg_model, cfg_train, xyz_min, xyz_max, 
             rays_o = rays_o_tr[sel_b, sel_r, sel_c]
             rays_d = rays_d_tr[sel_b, sel_r, sel_c]
             viewdirs = viewdirs_tr[sel_b, sel_r, sel_c]
-            if time_tr != None:
-                frame_time = time_tr[sel_b, sel_r, sel_c]
-            else:
-                frame_time = None
         else:
             raise NotImplementedError
 
@@ -557,22 +441,12 @@ def scene_rep_reconstruction(args, cfg, cfg_model, cfg_train, xyz_min, xyz_max, 
             rays_o = rays_o.to(device)
             rays_d = rays_d.to(device)
             viewdirs = viewdirs.to(device)
-            if time_tr != None:
-                frame_time = frame_time.to(device)
-            else:
-                frame_time = None
 
         # volume rendering
-        if args.tivox:
-            render_result = model(
-                rays_o, rays_d, viewdirs, frame_time = frame_time,
-                global_step=global_step, is_train=True,
-                **render_kwargs)
-        else:
-            render_result = model(
-                rays_o, rays_d, viewdirs, frame_time = frame_time,
-                global_step=global_step, is_train=True,
-                **render_kwargs)
+        render_result = model(
+            rays_o, rays_d, viewdirs,
+            global_step=global_step, is_train=True,
+            **render_kwargs)
 
         # gradient descent step
         optimizer.zero_grad(set_to_none=True)
@@ -680,16 +554,9 @@ def train(args, cfg, data_dict):
     # fine detail reconstruction
     eps_fine = time.time()
     if cfg.coarse_train.N_iters == 0:
-        # xyz_min_fine, xyz_max_fine = xyz_min_coarse.clone(), xyz_max_coarse.clone()
-        xyz_max_fine = torch.tensor([0.07498, 0.07498, 0.05785]).cuda()
-        xyz_min_fine = torch.tensor([-0.07498, -0.07498, -0.05785]).cuda()
+        xyz_min_fine, xyz_max_fine = xyz_min_coarse.clone(), xyz_max_coarse.clone()
     else:
-        if args.tivox:
-            xyz_min_fine, xyz_max_fine = compute_bbox_by_coarse_geo(
-                model_class=dvgo_tivox.DirectVoxGO_tivox, model_path=coarse_ckpt_path,
-                thres=cfg.fine_model_and_render.bbox_thres)
-        else:
-            xyz_min_fine, xyz_max_fine = compute_bbox_by_coarse_geo(
+        xyz_min_fine, xyz_max_fine = compute_bbox_by_coarse_geo(
                 model_class=dvgo.DirectVoxGO, model_path=coarse_ckpt_path,
                 thres=cfg.fine_model_and_render.bbox_thres)
     scene_rep_reconstruction(
@@ -721,23 +588,6 @@ if __name__=='__main__':
     else:
         device = torch.device('cpu')
     seed_everything()
-
-    # change 
-    if args.expname:
-        cfg.expname = args.expname
-    if args.gridnum_scale:
-        res = args.gridnum_scale.strip('[')
-        res = res.strip(']')
-        res = res.split(',')
-        res = list(map(int, res)) 
-        cfg.fine_train.gridnum_scale = res
-    else:
-        cfg.fine_train.gridnum_scale = None
-    if args.skipcoarse:
-        cfg.coarse_train.N_iters = 0
-    if args.num_voxels != None:
-        cfg.fine_model_and_render.num_voxels = args.num_voxels ** 3
-        cfg.fine_model_and_render.num_voxels_base = cfg.fine_model_and_render.num_voxels
 
     # load images / poses / camera settings / data split
     data_dict = load_everything(args=args, cfg=cfg)
@@ -791,10 +641,7 @@ if __name__=='__main__':
         elif cfg.data.unbounded_inward:
             model_class = dcvgo.DirectContractedVoxGO
         else:
-            if args.tivox:
-                model_class = dvgo_tivox.DirectVoxGO_tivox
-            else:
-                model_class = dvgo.DirectVoxGO
+            model_class = dvgo.DirectVoxGO
         model = utils.load_model(model_class, ckpt_path).to(device)
         stepsize = cfg.fine_model_and_render.stepsize
         render_viewpoints_kwargs = {
@@ -812,27 +659,19 @@ if __name__=='__main__':
             },
         }
 
-    test_psnr = -1
-    train_psnr = -1
     # render trainset and eval
     if args.render_train:
         testsavedir = os.path.join(cfg.basedir, cfg.expname, f'render_train_{ckpt_name}')
         os.makedirs(testsavedir, exist_ok=True)
         print('All results are dumped into', testsavedir)
-        if 'times' not in data_dict:
-            render_times = None
-        else:
-            render_times = data_dict['times'][data_dict['i_train']]
-        rgbs, depths, bgmaps, train_psnr = render_viewpoints(
+        rgbs, depths, bgmaps = render_viewpoints(
                 render_poses=data_dict['poses'][data_dict['i_train']],
                 HW=data_dict['HW'][data_dict['i_train']],
                 Ks=data_dict['Ks'][data_dict['i_train']],
                 gt_imgs=[data_dict['images'][i].cpu().numpy() for i in data_dict['i_train']],
                 savedir=testsavedir, dump_images=args.dump_images,
                 eval_ssim=args.eval_ssim, eval_lpips_alex=args.eval_lpips_alex, eval_lpips_vgg=args.eval_lpips_vgg,
-                render_times = render_times,
                 **render_viewpoints_kwargs)
-        rgbs = np.concatenate((rgbs,[data_dict['images'][i].cpu().numpy() for i in data_dict['i_train']]),axis=2)
         imageio.mimwrite(os.path.join(testsavedir, 'video.rgb.mp4'), utils.to8b(rgbs), fps=30, quality=8)
         imageio.mimwrite(os.path.join(testsavedir, 'video.depth.mp4'), utils.to8b(1 - depths / np.max(depths)), fps=30, quality=8)
 
@@ -841,20 +680,14 @@ if __name__=='__main__':
         testsavedir = os.path.join(cfg.basedir, cfg.expname, f'render_test_{ckpt_name}')
         os.makedirs(testsavedir, exist_ok=True)
         print('All results are dumped into', testsavedir)
-        if 'times' not in data_dict:
-            render_times = None
-        else:
-            render_times = data_dict['times'][data_dict['i_test']]
-        rgbs, depths, bgmaps, test_psnr = render_viewpoints(
+        rgbs, depths, bgmaps = render_viewpoints(
                 render_poses=data_dict['poses'][data_dict['i_test']],
                 HW=data_dict['HW'][data_dict['i_test']],
                 Ks=data_dict['Ks'][data_dict['i_test']],
                 gt_imgs=[data_dict['images'][i].cpu().numpy() for i in data_dict['i_test']],
                 savedir=testsavedir, dump_images=args.dump_images,
                 eval_ssim=args.eval_ssim, eval_lpips_alex=args.eval_lpips_alex, eval_lpips_vgg=args.eval_lpips_vgg,
-                render_times = render_times,
                 **render_viewpoints_kwargs)
-        rgbs = np.concatenate((rgbs,[data_dict['images'][i].cpu().numpy() for i in data_dict['i_test']]),axis=2)
         imageio.mimwrite(os.path.join(testsavedir, 'video.rgb.mp4'), utils.to8b(rgbs), fps=30, quality=8)
         imageio.mimwrite(os.path.join(testsavedir, 'video.depth.mp4'), utils.to8b(1 - depths / np.max(depths)), fps=30, quality=8)
 
@@ -878,43 +711,6 @@ if __name__=='__main__':
         dmin, dmax = np.percentile(depths_vis[bgmaps < 0.1], q=[5, 95])
         depth_vis = plt.get_cmap('rainbow')(1 - np.clip((depths_vis - dmin) / (dmax - dmin), 0, 1)).squeeze()[..., :3]
         imageio.mimwrite(os.path.join(testsavedir, 'video.depth.mp4'), utils.to8b(depth_vis), fps=30, quality=8)
-    
-    if args.idea:
-        with torch.no_grad():
-            gt_nii = sitk.ReadImage('/data/zhenghongzhou/repo/DirectVoxGO-torch/data/dsa/gt.nii.gz')
-            size = model.world_size.cpu().detach().numpy()
-            gt_array = sitk.GetArrayFromImage(gt_nii)
-            gt_tensor = torch.from_numpy(gt_array).cuda()
-            gt_tensor = gt_tensor.transpose(0, 2).contiguous()
-            gt_tensor = torch.flip(gt_tensor, [0])
-            # gt_tensor = gt_tensor[100:612,100:612,:]
-            gt_nii_2 = sitk.GetImageFromArray(gt_tensor.cpu().numpy())
-            gt_nii_2 = resize_image_itk(gt_nii_2, (size[2],size[1],size[0]),resamplemethod=sitk.sitkLinear)
-            gt_array = sitk.GetArrayFromImage(gt_nii_2)
-            label_3d = gt_array
-            
-            # pred_3d = model.activate_density(model.density).squeeze().cpu().numpy()
-            pred_3d = model.activate_density(model.density.get_dense_grid()).squeeze().cpu().numpy()
-            print('MSE:',np.mean((pred_3d - label_3d) ** 2))
-            psnr_3d = -10. * np.log10(np.mean(np.square(pred_3d - label_3d)))
-            print('PSNR_3d:', psnr_3d )
 
-            psnr_3d = (psnr_3d-psnr_3d.min)
-            psnr_3d = psnr_3d/psnr_3d.max()
-            cv2.imwrite('/data/zhenghongzhou/repo/DirectVoxGO/logs/dsa_idea_1123/pred_max0.jpg', psnr_3d.max(0)*255)
-            cv2.imwrite('/data/zhenghongzhou/repo/DirectVoxGO/logs/dsa_idea_1123/pred_max0.jpg', psnr_3d.max(1)*255)
-            cv2.imwrite('/data/zhenghongzhou/repo/DirectVoxGO/logs/dsa_idea_1123/pred_max0.jpg', psnr_3d.max(2)*255)
-            label_3d = (label_3d-label_3d.min)
-            label_3d = label_3d/label_3d.max()
-            cv2.imwrite('/data/zhenghongzhou/repo/DirectVoxGO/logs/dsa_idea_1123/pred_max0.jpg', label_3d.max(0)*255)
-            cv2.imwrite('/data/zhenghongzhou/repo/DirectVoxGO/logs/dsa_idea_1123/pred_max0.jpg', label_3d.max(1)*255)
-            cv2.imwrite('/data/zhenghongzhou/repo/DirectVoxGO/logs/dsa_idea_1123/pred_max0.jpg', label_3d.max(2)*255)
-
-    if args.save_txt:
-        if args.idea:
-            with open(os.path.join(cfg.basedir, args.save_txt),'a') as f:
-                f.write('img_size='+str(args.size)+'  train_num= '+str(args.train_num)+'  psnr= '+str(test_psnr)+ '  3d_psnr= '+str(psnr_3d) + '  train_psnr= '+str(train_psnr)+'\n')
-        else:
-            with open(os.path.join(cfg.basedir, args.save_txt),'a') as f:
-                f.write('img_size='+str(args.size)+'  train_num= '+str(args.train_num)+'  psnr= '+str(test_psnr)+ '  train_psnr= '+str(train_psnr)+'\n')
     print('Done')
+

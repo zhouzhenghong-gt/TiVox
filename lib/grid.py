@@ -1,6 +1,7 @@
 import os
 import time
 import functools
+import math
 import numpy as np
 
 import torch
@@ -63,6 +64,20 @@ class DenseGrid(nn.Module):
         else:
             self.grid = nn.Parameter(
                 F.interpolate(self.grid.data, size=tuple(new_world_size), mode='trilinear', align_corners=True))
+
+    def scale_grid_num(self, num_grids):
+        density_origin = self.grid.data
+        density_interpo = torch.zeros(self.grid.data.shape[0],num_grids,self.grid.data.shape[2],self.grid.data.shape[3],self.grid.data.shape[4])
+        num0 = density_origin.shape[1] - 1 # 3
+        num1 = num_grids - 1 # 6
+        for i in range(density_interpo.shape[1]):
+            density_num = math.floor(i/num1 * num0)
+            if density_num != num0:
+                density_interpo[:,i,:,:,:] = (density_origin[:,density_num+1,:,:,:] - density_origin[:,density_num,:,:,:]) * num0 * (i/num1 - density_num/num0) + density_origin[:,density_num,:,:,:]
+            else:
+                density_interpo[:,i,:,:,:] = density_origin[:,density_num,:,:,:]
+        self.grid = torch.nn.Parameter(density_interpo)
+        self.channels = num_grids
 
     def total_variation_add_grad(self, wx, wy, wz, dense_mode):
         '''Add gradients by total variation loss in-place'''
@@ -209,6 +224,8 @@ class MaskGrid(nn.Module):
             self.mask_cache_thres = mask_cache_thres
             density = F.max_pool3d(st['model_state_dict']['density.grid'], kernel_size=3, padding=1, stride=1)
             alpha = 1 - torch.exp(-F.softplus(density + st['model_state_dict']['act_shift']) * st['model_kwargs']['voxel_size_ratio'])
+            if alpha.shape[1]>1:
+                alpha = alpha.max(1)[0].unsqueeze(1)
             mask = (alpha >= self.mask_cache_thres).squeeze(0).squeeze(0)
             xyz_min = torch.Tensor(st['model_kwargs']['xyz_min'])
             xyz_max = torch.Tensor(st['model_kwargs']['xyz_max'])

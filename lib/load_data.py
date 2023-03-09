@@ -1,5 +1,5 @@
 import numpy as np
-
+import torch
 from .load_llff import load_llff_data
 from .load_blender import load_blender_data
 from .load_nsvf import load_nsvf_data
@@ -8,9 +8,11 @@ from .load_tankstemple import load_tankstemple_data
 from .load_deepvoxels import load_dv_data
 from .load_co3d import load_co3d_data
 from .load_nerfpp import load_nerfpp_data
+from .load_dsa_idea import load_dsa_idea_data
+from .load_dsa_real import load_dsa_real_data
 
 
-def load_data(args):
+def load_data(args, train_num, radius, focal, size, tivox, time_mlp):
 
     K, depths = None, None
     near_clip = None
@@ -55,6 +57,37 @@ def load_data(args):
         i_train, i_val, i_test = i_split
 
         near, far = 2., 6.
+
+        if images.shape[-1] == 4:
+            if args.white_bkgd:
+                images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
+            else:
+                images = images[...,:3]*images[...,-1:]
+    
+    elif args.dataset_type == 'dsa_real':
+        if tivox or time_mlp:
+            images, poses, times, render_poses, render_times, hwf, i_split = load_dsa_real_data(args.datadir, args.half_res, args.testskip, train_num, radius, focal, size, tivox, time_mlp)
+        else:
+            images, poses, render_poses, hwf, i_split = load_dsa_real_data(args.datadir, args.half_res, args.testskip, train_num, radius, focal, size, tivox, time_mlp)
+        print('Loaded blender', images.shape, render_poses.shape, hwf, args.datadir)
+        i_train, i_val, i_test = i_split
+
+        near, far = 0.2, 1.0
+
+        if images.shape[-1] == 4:
+            if args.white_bkgd:
+                images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
+            else:
+                images = images[...,:3]*images[...,-1:]
+    elif args.dataset_type == 'dsa_idea':
+        if tivox or time_mlp:
+            images, poses, times, render_poses, render_times, hwf, i_split = load_dsa_idea_data(args.datadir, args.half_res, args.testskip, train_num, radius, focal, size, tivox, time_mlp)
+        else:
+            images, poses, render_poses, hwf, i_split = load_dsa_idea_data(args.datadir, args.half_res, args.testskip, train_num, radius, focal, size, tivox, time_mlp)
+        print('Loaded blender', images.shape, render_poses.shape, hwf, args.datadir)
+        i_train, i_val, i_test = i_split
+
+        near, far = 0.2, 1.0
 
         if images.shape[-1] == 4:
             if args.white_bkgd:
@@ -154,15 +187,25 @@ def load_data(args):
         Ks = K
 
     render_poses = render_poses[...,:4]
-
-    data_dict = dict(
-        hwf=hwf, HW=HW, Ks=Ks,
-        near=near, far=far, near_clip=near_clip,
-        i_train=i_train, i_val=i_val, i_test=i_test,
-        poses=poses, render_poses=render_poses,
-        images=images, depths=depths,
-        irregular_shape=irregular_shape,
-    )
+    if tivox or time_mlp:
+        data_dict = dict(
+            hwf=hwf, HW=HW, Ks=Ks,
+            near=near, far=far, near_clip=near_clip,
+            i_train=i_train, i_val=i_val, i_test=i_test,
+            poses=poses, render_poses=render_poses,
+            images=images, depths=depths,
+            irregular_shape=irregular_shape,
+            times=times, render_times=render_times,
+        )
+    else:
+        data_dict = dict(
+            hwf=hwf, HW=HW, Ks=Ks,
+            near=near, far=far, near_clip=near_clip,
+            i_train=i_train, i_val=i_val, i_test=i_test,
+            poses=poses, render_poses=render_poses,
+            images=images, depths=depths,
+            irregular_shape=irregular_shape,
+        )
     return data_dict
 
 

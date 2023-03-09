@@ -44,6 +44,7 @@ def create_optimizer_or_freeze_model(model, cfg_train, global_step):
             print(f'create_optimizer_or_freeze_model: param {k} freeze')
             param.requires_grad = False
     return MaskedAdam(param_group)
+    # return Adam(param_group, betas=(0.9,0.99))
 
 
 ''' Checkpoint utils
@@ -59,10 +60,13 @@ def load_checkpoint(model, optimizer, ckpt_path, no_reload_optimizer):
 
 def load_model(model_class, ckpt_path):
     ckpt = torch.load(ckpt_path)
-    model = model_class(**ckpt['model_kwargs'])
+    if 'k0_type' in ckpt['model_kwargs']:
+        model = model_class(**ckpt['model_kwargs'])
+    else:
+        model = model_class(**ckpt['model_kwargs'], color_nouse=True)
     model.load_state_dict(ckpt['model_state_dict'])
     return model
-
+    
 
 ''' Evaluation metrics (ssim, lpips)
 '''

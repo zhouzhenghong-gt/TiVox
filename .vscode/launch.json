@@ -1,0 +1,66 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: python run.py --config configs/dvg-dsa/dsa_real.py --render_test --no_color --train_num 50 --radius 0.5985 --focal 4086 --size 1024 --expname dvg-real-50 --no_reload --save_txt dvg_baseline.txt",
+            "type": "python",
+            "request": "launch",
+            "program": "run.py",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "1"
+            },
+            "console": "integratedTerminal",
+            "args": [
+                "--config",
+                "configs/dvg-dsa/dsa_real.py",
+                "--render_test",
+                // "--no_color",
+                "--time_mlp",
+                // "--idea",
+                // "--tivox",
+                // "--gridnum_scale","[10000]",
+                // "--skipcoarse",
+                "--noallgrid",
+                "--num_voxels", "320",
+                "--train_num","50",
+                "--radius","0.5985",
+                "--focal","4086",
+                "--size","1024",
+                "--expname","debug1",
+                // "--no_reload",
+                "--save_txt","dvg_baseline.txt",
+            ],
+            "cwd": "/data/zhenghongzhou/repo/DirectVoxGO"
+        },
+        {
+            "name": "Python: python run.py --config configs/dvg-dsa/dsa_real.py --render_test --no_color --train_num 50 --radius 0.5985 --focal 4086 --size 1024 --expname dvg-real-50 --no_reload --save_txt dvg_baseline.txt",
+            "type": "python",
+            "request": "launch",
+            "program": "run.py",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "3"
+            },
+            "console": "integratedTerminal",
+            "args": [
+                "--config",
+                "configs/dvg-dsa/dsa_real.py",
+                "--render_test",
+                "--no_color",
+                "--train_num",
+                "50",
+                "--radius",
+                "0.5985",
+                "--focal",
+                "4086",
+                "--size",
+                "1024",
+                "--expname",
+                "dvg-real-50",
+                "--no_reload",
+                "--save_txt",
+                "dvg_baseline.txt"
+            ],
+            "cwd": "/data/zhenghongzhou/repo/DirectVoxGO"
+        }
+    ]
+}

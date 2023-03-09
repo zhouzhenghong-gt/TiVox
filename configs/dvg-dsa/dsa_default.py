@@ -39,7 +39,7 @@ data = dict(
 ''' Template of training options
 '''
 coarse_train = dict(
-    N_iters=5000,                 # number of optimization steps
+    N_iters=10000,                 # number of optimization steps
     N_rand=8192,                  # batch size (number of random rays per optimization step)
     lrate_density=1e-1,           # lr of density voxel grid
     lrate_k0=1e-1,                # lr of color/feature voxel grid
@@ -73,7 +73,8 @@ fine_train.update(dict(
     ray_sampler='in_maskcache',
     weight_entropy_last=0.001,
     weight_rgbper=0.01,
-    pg_scale=[1000, 2000, 3000, 4000],
+    # pg_scale=[1000, 2000, 3000, 4000],
+    pg_scale=[2000, 4000, 6000],
     skip_zero_grad_fields=['density', 'k0'],
 ))
 
@@ -92,13 +93,15 @@ coarse_model_and_render = dict(
     in_act_density=False,         # in-activated trilinear interpolation
     bbox_thres=1e-3,              # threshold to determine known free-space in the fine stage
     mask_cache_thres=1e-3,        # threshold to determine a tighten BBox in the fine stage
+    # mask_cache_thres=0.0000011,
     rgbnet_dim=0,                 # feature voxel grid dim
     rgbnet_full_implicit=False,   # let the colors MLP ignore feature voxel grid
     rgbnet_direct=True,           # set to False to treat the first 3 dim of feature voxel grid as diffuse rgb
     rgbnet_depth=3,               # depth of the colors MLP (there are rgbnet_depth-1 intermediate features)
     rgbnet_width=128,             # width of the colors MLP
     alpha_init=1e-6,              # set the alpha values everywhere at the begin of training
-    fast_color_thres=1e-7,        # threshold of alpha value to skip the fine stage sampled point
+    # fast_color_thres=1e-7,        # threshold of alpha value to skip the fine stage sampled point
+    fast_color_thres=0,        # threshold of alpha value to skip the fine stage sampled point
     maskout_near_cam_vox=True,    # maskout grid points that between cameras and their near planes
     world_bound_scale=1,          # rescale the BBox enclosing the scene
     stepsize=0.5,                 # sampling stepsize in volume rendering
@@ -106,8 +109,8 @@ coarse_model_and_render = dict(
 
 fine_model_and_render = deepcopy(coarse_model_and_render)
 fine_model_and_render.update(dict(
-    num_voxels=160**3,
-    num_voxels_base=160**3,
+    num_voxels=220**3,
+    num_voxels_base=220**3,
     rgbnet_dim=12,
     alpha_init=1e-2,
     fast_color_thres=1e-4,
